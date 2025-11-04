@@ -1,0 +1,5 @@
+# Ignorar entorno virtual
+colegioenv/
+
+# Ignorar la carpeta random forest
+back_colegio/random forest/

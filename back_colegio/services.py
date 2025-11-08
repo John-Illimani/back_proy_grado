@@ -20,21 +20,54 @@ from .models.aptitudes_model import Aptitudes  # ✅ se importa el modelo de apt
 def descargar_desde_drive(file_id: str, destino: Path):
     """
     Descarga un archivo público de Google Drive y lo guarda en `destino`.
-    El archivo de Drive debe tener permiso "Cualquiera con el enlace".
+    Maneja también el caso de archivos grandes (token de confirmación).
     """
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    base_url = "https://drive.google.com/uc?export=download"
     destino.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"⬇️ Descargando {destino.name} desde Google Drive...")
-    resp = requests.get(url, stream=True)
-    resp.raise_for_status()
+    session = requests.Session()
 
+    print(f"⬇️ Descargando {destino.name} desde Google Drive...")
+
+    # 1º intento
+    response = session.get(base_url, params={"id": file_id}, stream=True, timeout=60)
+    response.raise_for_status()
+
+    # Si Google Drive devuelve un warning por archivo grande, hay una cookie especial
+    token = None
+    for k, v in response.cookies.items():
+        if k.startswith("download_warning"):
+            token = v
+            break
+
+    if token is not None:
+        # 2º intento con el token de confirmación
+        response = session.get(
+            base_url,
+            params={"id": file_id, "confirm": token},
+            stream=True,
+            timeout=60,
+        )
+        response.raise_for_status()
+
+    # Guardar el contenido en disco
     with open(destino, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
+        for chunk in response.iter_content(chunk_size=32768):
             if chunk:
                 f.write(chunk)
 
+    # Verificación básica: comprobar que no sea HTML
+    with open(destino, "rb") as f:
+        head = f.read(200).lower()
+        if b"<html" in head or b"<!doctype html" in head:
+            raise RuntimeError(
+                f"ERROR: Google Drive devolvió HTML en lugar del archivo binario "
+                f"para {destino.name}. Revisa el ID de archivo y los permisos "
+                f"(tiene que estar en 'Cualquiera con el enlace')."
+            )
+
     print(f"✅ Descarga completada: {destino}")
+
 
 
 def asegurar_modelos_descargados():
@@ -80,6 +113,15 @@ def asegurar_modelos_descargados():
 # 1. CARGA DE TODOS LOS COMPONENTES DEL SISTEMA DE IA ÉLITE
 #    (se ejecuta al iniciar Django)
 # =============================================================================
+# Inicializamos variables para evitar NameError si algo falla
+MODELS_DIR = None
+modelo_areas = None
+modelo_carreras = None
+feature_encoders = None
+le_area = None
+le_carrera = None
+carreras_bolivia = {}
+
 try:
     # Asegurarse de que todos los modelos estén descargados desde Drive
     MODELS_DIR = asegurar_modelos_descargados()
@@ -109,10 +151,15 @@ try:
 
     print("✅ Servicios de IA: Pipeline Élite y todos los componentes cargados correctamente.")
 
-except FileNotFoundError as e:
-    print(f"❌ ADVERTENCIA: No se encontró un archivo del modelo de IA: {e.filename}")
+except Exception as e:
+    # Capturamos cualquier error (RuntimeError, KeyError, FileNotFoundError, etc.)
+    print(f"❌ ERROR cargando modelos de IA: {e}")
     modelo_areas = None
-
+    modelo_carreras = None
+    feature_encoders = None
+    le_area = None
+    le_carrera = None
+    carreras_bolivia = {}
 
 # =============================================================================
 # FUNCIÓN PRINCIPAL DEL SERVICIO DE PREDICCIÓN

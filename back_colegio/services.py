@@ -48,14 +48,15 @@ def asegurar_modelos_descargados():
     models_dir.mkdir(parents=True, exist_ok=True)
 
     # Mapeo nombre_archivo -> ID de Google Drive (variables de entorno)
+    # Mapeo nombre_archivo -> ID de Google Drive (IDs "hardcodeados" para prueba)
+    # Mapeo nombre_archivo -> ID de Google Drive (IDs "hardcodeados" para prueba)
     archivos_drive = {
-        "modelo_areas_elite.pkl": os.getenv("DRIVE_MODELO_AREAS_ID"),
-        "modelo_carreras_elite.pkl": os.getenv("DRIVE_MODELO_CARRERAS_ID"),
-        "codificadores_features.pkl": os.getenv("DRIVE_FEATURE_ENCODERS_ID"),
-        "codificador_objetivo_area.pkl": os.getenv("DRIVE_LE_AREA_ID"),
-        "codificador_objetivo_carrera.pkl": os.getenv("DRIVE_LE_CARRERA_ID"),
+        "modelo_areas_elite.pkl": "1fJMLzbCDNQABU24h0oIdJgqmvNfFqyR-",
+        "modelo_carreras_elite.pkl": "1k6tPzvDJtWhoaar2wnGDUMBV_Q0GqNa0",
+        "codificadores_features.pkl": "1D0x-9eIi5ujuZn_7esvdUV6qF8_ODEAL",
+        "codificador_objetivo_area.pkl": "1gTTIqcdQk6Oxxbf5TIWo_ay_OisbryZC",
+        "codificador_objetivo_carrera.pkl": "1qawqksC29GSWNTcFhzAg4t7a-Kgvx8FS",
     }
-
     for nombre_archivo, file_id in archivos_drive.items():
         ruta_archivo = models_dir / nombre_archivo
 

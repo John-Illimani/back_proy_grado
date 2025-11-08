@@ -1,4 +1,6 @@
 from django.db import transaction
+import os
+import requests
 import joblib
 import pandas as pd
 from pathlib import Path
@@ -11,24 +13,87 @@ from .models.majors_model import Carreras
 from .models.aptitudes_model import Aptitudes  # ✅ se importa el modelo de aptitudes
 
 # =============================================================================
+# 0. FUNCIÓN PARA DESCARGAR LOS MODELOS DESDE GOOGLE DRIVE
+# =============================================================================
+
+# Helper: descarga un archivo de Google Drive dado su file_id
+def descargar_desde_drive(file_id: str, destino: Path):
+    """
+    Descarga un archivo público de Google Drive y lo guarda en `destino`.
+    El archivo de Drive debe tener permiso "Cualquiera con el enlace".
+    """
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"⬇️ Descargando {destino.name} desde Google Drive...")
+    resp = requests.get(url, stream=True)
+    resp.raise_for_status()
+
+    with open(destino, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+
+    print(f"✅ Descarga completada: {destino}")
+
+
+def asegurar_modelos_descargados():
+    """
+    Verifica si los .pkl existen en disco.
+    Si falta alguno, lo descarga desde Google Drive usando los IDs de archivo.
+    Los IDs se leen de variables de entorno (Render → Environment).
+    """
+    # Carpeta local donde guardaremos los modelos
+    models_dir = Path(settings.BASE_DIR) / "back_colegio" / "random forest"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Mapeo nombre_archivo -> ID de Google Drive (variables de entorno)
+    archivos_drive = {
+        "modelo_areas_elite.pkl": os.getenv("DRIVE_MODELO_AREAS_ID"),
+        "modelo_carreras_elite.pkl": os.getenv("DRIVE_MODELO_CARRERAS_ID"),
+        "codificadores_features.pkl": os.getenv("DRIVE_FEATURE_ENCODERS_ID"),
+        "codificador_objetivo_area.pkl": os.getenv("DRIVE_LE_AREA_ID"),
+        "codificador_objetivo_carrera.pkl": os.getenv("DRIVE_LE_CARRERA_ID"),
+    }
+
+    for nombre_archivo, file_id in archivos_drive.items():
+        ruta_archivo = models_dir / nombre_archivo
+
+        if ruta_archivo.exists():
+            # Ya está en disco
+            continue
+
+        if not file_id:
+            raise RuntimeError(
+                f"No se encontró la variable de entorno con el ID de Drive "
+                f"para {nombre_archivo}. Revisa tu config en Render."
+            )
+
+        # Descargar desde Drive
+        descargar_desde_drive(file_id, ruta_archivo)
+
+    return models_dir
+
+
+# =============================================================================
 # 1. CARGA DE TODOS LOS COMPONENTES DEL SISTEMA DE IA ÉLITE
-# Este bloque se ejecuta una sola vez cuando Django inicia el servidor.
+#    (se ejecuta al iniciar Django)
 # =============================================================================
 try:
-    # Define la ruta base donde guardaste los archivos .pkl
-    MODELS_DIR = Path(settings.BASE_DIR) / "back_colegio" / "random forest"
-    
+    # Asegurarse de que todos los modelos estén descargados desde Drive
+    MODELS_DIR = asegurar_modelos_descargados()
+
     # Carga los 2 modelos entrenados
     modelo_areas = joblib.load(MODELS_DIR / "modelo_areas_elite.pkl")
     modelo_carreras = joblib.load(MODELS_DIR / "modelo_carreras_elite.pkl")
-    
+
     # Carga el codificador para las respuestas (features)
     feature_encoders = joblib.load(MODELS_DIR / "codificadores_features.pkl")
-    
+
     # Carga los codificadores para los resultados (objetivos)
     le_area = joblib.load(MODELS_DIR / "codificador_objetivo_area.pkl")
     le_carrera = joblib.load(MODELS_DIR / "codificador_objetivo_carrera.pkl")
-    
+
     # El diccionario de carreras es necesario para el filtrado final de las recomendaciones
     carreras_bolivia = {
         "Ingeniería y Tecnología": ["Ingeniería Civil", "Ingeniería de Sistemas", "Ingeniería Industrial", "Ingeniería Mecánica", "Ingeniería Electrónica", "Ingeniería Química", "Arquitectura", "Ingeniería Petrolera"],
@@ -46,6 +111,7 @@ try:
 except FileNotFoundError as e:
     print(f"❌ ADVERTENCIA: No se encontró un archivo del modelo de IA: {e.filename}")
     modelo_areas = None
+
 
 # =============================================================================
 # FUNCIÓN PRINCIPAL DEL SERVICIO DE PREDICCIÓN

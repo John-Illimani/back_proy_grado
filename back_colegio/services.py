@@ -5,6 +5,7 @@ import joblib
 import pandas as pd
 from pathlib import Path
 from django.conf import settings
+import gdown
 
 # Importaciones de tus modelos de Django
 from .models.tests_model import OpcionRespuesta
@@ -19,69 +20,20 @@ from .models.aptitudes_model import Aptitudes  # ✅ se importa el modelo de apt
 # Helper: descarga un archivo de Google Drive dado su file_id
 def descargar_desde_drive(file_id: str, destino: Path):
     """
-    Descarga un archivo público de Google Drive y lo guarda en `destino`.
-    Maneja el caso de archivos grandes (página de 'no se puede analizar en busca de virus')
-    usando cookie download_warning y, si hace falta, el token 'confirm' del HTML.
+    Descarga un archivo público de Google Drive y lo guarda en `destino`
+    usando gdown (maneja archivos grandes automáticamente).
+    El archivo debe estar con permiso 'Cualquiera con el enlace'.
     """
-    base_url = "https://drive.google.com/uc"
     destino.parent.mkdir(parents=True, exist_ok=True)
 
-    session = requests.Session()
+    # URL estándar para gdown
+    url = f"https://drive.google.com/uc?id={file_id}"
 
-    print(f"⬇️ Descargando {destino.name} desde Google Drive...")
+    print(f"⬇️ Descargando {destino.name} desde Google Drive con gdown...")
+    # quiet=False para que muestre progreso en los logs de Render
+    gdown.download(url, str(destino), quiet=False)
 
-    # ---- 1er intento ----
-    response = session.get(
-        base_url,
-        params={"export": "download", "id": file_id},
-        stream=True,
-        timeout=60,
-    )
-    response.raise_for_status()
-
-    content_type = response.headers.get("Content-Type", "").lower()
-
-    # 1) Intentar sacar token desde la cookie download_warning
-    token = None
-    for k, v in response.cookies.items():
-        if k.startswith("download_warning"):
-            token = v
-            break
-
-    # 2) Si no hay token en cookie y la respuesta es HTML, intentar parsear el 'confirm=' del HTML
-    if token is None and "text/html" in content_type:
-        html = response.text
-        for line in html.splitlines():
-            if "confirm=" in line:
-                start = line.find("confirm=")
-                if start != -1:
-                    start += len("confirm=")
-                    # saltar posibles comillas / caracteres raros
-                    while start < len(line) and line[start] in ['"', "'", "&"]:
-                        start += 1
-                    end = start
-                    while end < len(line) and line[end] not in ['&', '"', "'", '\\', '>']:
-                        end += 1
-                    token = line[start:end]
-                    break
-
-    # 3) Si encontramos token (por cookie o HTML), hacemos 2º intento con confirm=token
-    if token is not None:
-        response = session.get(
-            base_url,
-            params={"export": "download", "id": file_id, "confirm": token},
-            stream=True,
-            timeout=60,
-        )
-        response.raise_for_status()
-
-    # A partir de aquí, asumimos que response es binario (o al menos lo intentamos)
-    with open(destino, "wb") as f:
-        for chunk in response.iter_content(chunk_size=32768):
-            if chunk:
-                f.write(chunk)
-
-    # Verificación final: asegurarnos de que no se guardó HTML
+    # Verificación rápida de que no se haya guardado HTML por algún motivo raro
     with open(destino, "rb") as f:
         head = f.read(200).lower()
         if b"<html" in head or b"<!doctype html" in head:
@@ -92,6 +44,7 @@ def descargar_desde_drive(file_id: str, destino: Path):
             )
 
     print(f"✅ Descarga completada: {destino}")
+
 
 
 

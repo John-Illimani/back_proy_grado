@@ -20,43 +20,68 @@ from .models.aptitudes_model import Aptitudes  # ✅ se importa el modelo de apt
 def descargar_desde_drive(file_id: str, destino: Path):
     """
     Descarga un archivo público de Google Drive y lo guarda en `destino`.
-    Maneja también el caso de archivos grandes (token de confirmación).
+    Maneja el caso de archivos grandes (página de 'no se puede analizar en busca de virus').
     """
-    base_url = "https://drive.google.com/uc?export=download"
+    base_url = "https://drive.google.com/uc"
     destino.parent.mkdir(parents=True, exist_ok=True)
 
     session = requests.Session()
 
     print(f"⬇️ Descargando {destino.name} desde Google Drive...")
 
-    # 1º intento
-    response = session.get(base_url, params={"id": file_id}, stream=True, timeout=60)
+    # ---- 1er intento: puede devolver html con el aviso de 'archivo grande' ----
+    response = session.get(
+        base_url,
+        params={"export": "download", "id": file_id},
+        timeout=60,
+    )
     response.raise_for_status()
 
-    # Si Google Drive devuelve un warning por archivo grande, hay una cookie especial
-    token = None
-    for k, v in response.cookies.items():
-        if k.startswith("download_warning"):
-            token = v
-            break
+    content_type = response.headers.get("Content-Type", "").lower()
 
-    if token is not None:
-        # 2º intento con el token de confirmación
+    # Si es HTML, probablemente es la página de aviso; buscamos el token 'confirm='
+    if "text/html" in content_type:
+        html = response.text
+        token = None
+
+        # Buscar el parámetro confirm=XXXX en el html
+        for line in html.splitlines():
+            if "confirm=" in line:
+                start = line.find("confirm=")
+                if start != -1:
+                    start += len("confirm=")
+                    # saltar posibles comillas / caracteres raros
+                    while start < len(line) and line[start] in ['"', "'", "&"]:
+                        start += 1
+                    end = start
+                    while end < len(line) and line[end] not in ['&', '"', "'", '\\', '>']:
+                        end += 1
+                    token = line[start:end]
+                    break
+
+        if not token:
+            # No encontramos token, algo raro devolvió Drive
+            raise RuntimeError(
+                f"ERROR: Google Drive devolvió HTML para {destino.name} "
+                f"y no se pudo extraer el token 'confirm'."
+            )
+
+        # ---- 2º intento: ahora sí, con el token de confirmación ----
         response = session.get(
             base_url,
-            params={"id": file_id, "confirm": token},
+            params={"export": "download", "id": file_id, "confirm": token},
             stream=True,
             timeout=60,
         )
         response.raise_for_status()
 
-    # Guardar el contenido en disco
+    # Si no era HTML, asumimos que ya es binario y seguimos igual (o venimos del 2º intento)
     with open(destino, "wb") as f:
         for chunk in response.iter_content(chunk_size=32768):
             if chunk:
                 f.write(chunk)
 
-    # Verificación básica: comprobar que no sea HTML
+    # Verificación final: asegurarnos de que no se guardó HTML
     with open(destino, "rb") as f:
         head = f.read(200).lower()
         if b"<html" in head or b"<!doctype html" in head:
@@ -67,6 +92,7 @@ def descargar_desde_drive(file_id: str, destino: Path):
             )
 
     print(f"✅ Descarga completada: {destino}")
+
 
 
 

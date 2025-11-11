@@ -76,7 +76,8 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "https://mqs-orientacion-vocacional.deno.dev"
+    "https://mqs-orientacion-vocacional.deno.dev",
+    "https://descubre-tu-vocacion-mqs.deno.dev/"
 ]
 
 
